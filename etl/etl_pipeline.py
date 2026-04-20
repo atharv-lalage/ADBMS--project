@@ -61,7 +61,7 @@ def populate_oltp(df, engine):
     users_df['user_id'] = users_df['user_id'].astype(int).astype(str)
     users_df['name'] = 'User ' + users_df['user_id']
     users_df['email'] = 'user' + users_df['user_id'] + '@example.com'
-    users_df.to_sql('users', engine, if_exists='append', index=False)
+    users_df.to_sql('ecom_users', engine, if_exists='append', index=False)
     
     # Extract Products
     products_df = df[['StockCode', 'Description', 'Category', 'UnitPrice']].drop_duplicates(subset=['StockCode']).copy()
@@ -69,21 +69,21 @@ def populate_oltp(df, engine):
     products_df = products_df.groupby('StockCode').first().reset_index()
     products_df.columns = ['product_id', 'name', 'category', 'price']
     products_df['product_id'] = products_df['product_id'].astype(str)
-    products_df.to_sql('products', engine, if_exists='append', index=False)
+    products_df.to_sql('ecom_products', engine, if_exists='append', index=False)
     
     # Extract Orders
     orders_df = df[['InvoiceNo', 'CustomerID', 'InvoiceDate']].drop_duplicates(subset=['InvoiceNo']).copy()
     orders_df.columns = ['order_id', 'user_id', 'order_date']
     orders_df['order_id'] = orders_df['order_id'].astype(str)
     orders_df['user_id'] = orders_df['user_id'].astype(int).astype(str)
-    orders_df.to_sql('orders', engine, if_exists='append', index=False)
+    orders_df.to_sql('ecom_orders', engine, if_exists='append', index=False)
     
     # Extract Order Items
     order_items_df = df[['InvoiceNo', 'StockCode', 'Quantity', 'Amount']].copy()
     order_items_df.columns = ['order_id', 'product_id', 'quantity', 'amount']
     order_items_df['order_id'] = order_items_df['order_id'].astype(str)
     order_items_df['product_id'] = order_items_df['product_id'].astype(str)
-    order_items_df.to_sql('order_items', engine, if_exists='append', index=False)
+    order_items_df.to_sql('ecom_order_items', engine, if_exists='append', index=False)
     print("OLTP Tables populated.")
 
 def populate_dw(df, engine):
@@ -92,10 +92,10 @@ def populate_dw(df, engine):
     # Categories
     categories = df[['Category']].drop_duplicates().copy()
     categories.columns = ['category_name']
-    categories.to_sql('dim_category', engine, if_exists='append', index=False)
+    categories.to_sql('ecom_dim_category', engine, if_exists='append', index=False)
 
     # Fetch Category IDs to map to dimension product
-    category_map = pd.read_sql("SELECT category_id, category_name FROM dim_category", engine)
+    category_map = pd.read_sql("SELECT category_id, category_name FROM ecom_dim_category", engine)
     category_dict = dict(zip(category_map['category_name'], category_map['category_id']))
 
     # Dim Customer
@@ -103,7 +103,7 @@ def populate_dw(df, engine):
     dim_cust.columns = ['user_id', 'country']
     dim_cust['user_id'] = dim_cust['user_id'].astype(int).astype(str)
     dim_cust['name'] = 'User ' + dim_cust['user_id']
-    dim_cust.to_sql('dim_customer', engine, if_exists='append', index=False)
+    dim_cust.to_sql('ecom_dim_customer', engine, if_exists='append', index=False)
 
     # Dim Product
     dim_prod = df[['StockCode', 'Description', 'Category', 'UnitPrice']].drop_duplicates(subset=['StockCode']).copy()
@@ -112,7 +112,7 @@ def populate_dw(df, engine):
     dim_prod = dim_prod[['StockCode', 'Description', 'category_id', 'UnitPrice']]
     dim_prod.columns = ['product_id', 'name', 'category_id', 'price']
     dim_prod['product_id'] = dim_prod['product_id'].astype(str)
-    dim_prod.to_sql('dim_product', engine, if_exists='append', index=False)
+    dim_prod.to_sql('ecom_dim_product', engine, if_exists='append', index=False)
 
     # Dim Time
     time_df = df[['InvoiceDate']].drop_duplicates().copy()
@@ -124,7 +124,7 @@ def populate_dw(df, engine):
     time_df['quarter'] = time_df['InvoiceDate'].dt.quarter
     time_df['day_of_week'] = time_df['InvoiceDate'].dt.dayofweek
     time_df = time_df.drop('InvoiceDate', axis=1).drop_duplicates(subset=['date_id'])
-    time_df.to_sql('dim_time', engine, if_exists='append', index=False)
+    time_df.to_sql('ecom_dim_time', engine, if_exists='append', index=False)
 
     # Fact Table
     fact_df = df[['InvoiceNo', 'StockCode', 'CustomerID', 'InvoiceDate', 'Quantity', 'Amount']].copy()
@@ -135,7 +135,7 @@ def populate_dw(df, engine):
     
     fact_df = fact_df[['order_id', 'product_id', 'user_id', 'date_id', 'Quantity', 'Amount']]
     fact_df.columns = ['order_id', 'product_id', 'user_id', 'date_id', 'quantity', 'amount']
-    fact_df.to_sql('sales_fact', engine, if_exists='append', index=False)
+    fact_df.to_sql('ecom_sales_fact', engine, if_exists='append', index=False)
     
     print("Data Warehouse populated.")
 

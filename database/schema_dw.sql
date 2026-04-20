@@ -1,35 +1,32 @@
 -- Data Warehouse Schema for E-Commerce Data Analytics System
--- Drop tables if they exist
-DROP TABLE IF EXISTS sales_fact;
-DROP TABLE IF EXISTS dim_time;
-DROP TABLE IF EXISTS dim_product;
-DROP TABLE IF EXISTS dim_customer;
-DROP TABLE IF EXISTS dim_category;
+-- Prefixed with ecom_ to avoid collision with other project tables
 
--- Snowflake schema aspect: Separate category table
-CREATE TABLE dim_category (
+DROP TABLE IF EXISTS ecom_sales_fact CASCADE;
+DROP TABLE IF EXISTS ecom_dim_time CASCADE;
+DROP TABLE IF EXISTS ecom_dim_product CASCADE;
+DROP TABLE IF EXISTS ecom_dim_customer CASCADE;
+DROP TABLE IF EXISTS ecom_dim_category CASCADE;
+
+CREATE TABLE ecom_dim_category (
     category_id SERIAL PRIMARY KEY,
     category_name VARCHAR(100) UNIQUE
 );
 
--- Dimension: Customer
-CREATE TABLE dim_customer (
+CREATE TABLE ecom_dim_customer (
     user_id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(100),
     country VARCHAR(50)
 );
 
--- Dimension: Product
-CREATE TABLE dim_product (
+CREATE TABLE ecom_dim_product (
     product_id VARCHAR(50) PRIMARY KEY,
     name TEXT,
-    category_id INTEGER REFERENCES dim_category(category_id),
+    category_id INTEGER REFERENCES ecom_dim_category(category_id),
     price DECIMAL(10, 2)
 );
 
--- Dimension: Time
-CREATE TABLE dim_time (
-    date_id INT PRIMARY KEY, -- e.g., 20231201 for YYYYMMDD
+CREATE TABLE ecom_dim_time (
+    date_id INT PRIMARY KEY,
     full_date DATE,
     day INT,
     month INT,
@@ -38,13 +35,12 @@ CREATE TABLE dim_time (
     day_of_week INT
 );
 
--- Fact Table
-CREATE TABLE sales_fact (
+CREATE TABLE ecom_sales_fact (
     fact_id SERIAL PRIMARY KEY,
     order_id VARCHAR(50),
-    product_id VARCHAR(50) REFERENCES dim_product(product_id),
-    user_id VARCHAR(50) REFERENCES dim_customer(user_id),
-    date_id INT REFERENCES dim_time(date_id),
+    product_id VARCHAR(50) REFERENCES ecom_dim_product(product_id),
+    user_id VARCHAR(50) REFERENCES ecom_dim_customer(user_id),
+    date_id INT REFERENCES ecom_dim_time(date_id),
     quantity INTEGER,
     amount DECIMAL(10, 2)
 );

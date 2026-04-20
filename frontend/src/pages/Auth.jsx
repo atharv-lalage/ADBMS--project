@@ -64,7 +64,7 @@ export default function Auth({ onLogin }) {
           {error && <div style={{ color: '#ec4899', fontSize: '0.85rem', textAlign: 'center' }}>{error}</div>}
 
           <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.75rem', marginTop: '0.5rem' }}>
-            Authenticate Securly
+            Authenticate Securely
           </button>
         </form>
       </motion.div>
