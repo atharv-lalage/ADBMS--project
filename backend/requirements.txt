@@ -1,0 +1,10 @@
+Flask
+flask-cors
+gunicorn
+pandas
+scikit-learn
+psycopg2-binary
+SQLAlchemy
+mlxtend
+openpyxl
+python-dotenv
