@@ -1,6 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
+import { motion } from 'framer-motion';
+import { Download } from 'lucide-react';
+
+const pageVariants = {
+  initial: { opacity: 0, y: 20 },
+  in: { opacity: 1, y: 0 },
+  out: { opacity: 0, y: -20 }
+};
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.1 } }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, scale: 0.95 },
+  show: { opacity: 1, scale: 1 }
+};
 
 export default function Dashboard() {
   const [salesData, setSalesData] = useState({ total_sales: 0, total_orders: 0, average_order_value: 0 });
@@ -9,7 +27,7 @@ export default function Dashboard() {
   const [marketBasket, setMarketBasket] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Fallback Mock Data in case Python API is not running
+  // Fallback Mock Data
   const mockPredictions = [
     { period: '2010-12', actual_sales: 78640485, predicted_sales: 77700000 },
     { period: '2011-01', actual_sales: 58800000, predicted_sales: 60900000 },
@@ -86,131 +104,150 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
+  const exportCSV = () => {
+    let csv = "Rule,Confidence,Support,Lift\n";
+    marketBasket.forEach(row => {
+        csv += `"${row.rule}",${row.confidence},${row.support},${row.lift}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.setAttribute('hidden', '');
+    a.setAttribute('href', url);
+    a.setAttribute('download', 'market_basket_rules.csv');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const COLORS = ['#6366f1', '#ec4899', '#10B981'];
 
-  if (loading) {
-    return (
-      <div className="loading-container">
-        <div className="loader"></div>
-      </div>
-    );
-  }
-
   return (
-    <div className="container">
-      <div className="page-header">
-        <h1>Decision Support Dashboard</h1>
-        <p>Data Warehousing & Mining Insights</p>
+    <motion.div 
+      className="container"
+      initial="initial" animate="in" exit="out" variants={pageVariants}
+    >
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <h1>Decision Support Analytics</h1>
+          <p>Real-time DW & ML Reporting Matrix</p>
+        </div>
+        <button className="btn btn-outline" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={exportCSV}>
+          <Download size={16} /> Export Intel
+        </button>
       </div>
 
-      {/* KPI Stats */}
-      <div className="dashboard-grid">
-        <div className="glass-panel stat-card">
-          <h3>Total Sales Velocity</h3>
-          <div className="value">₹{salesData.total_sales?.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
-          <span style={{ color: 'var(--accent-secondary)', fontSize: '0.9rem' }}>+12% vs Last Year (Roll-up)</span>
-        </div>
-        <div className="glass-panel stat-card">
-          <h3>Total Checkouts</h3>
-          <div className="value">{salesData.total_orders?.toLocaleString()}</div>
-          <span style={{ color: 'var(--accent-primary)', fontSize: '0.9rem' }}>Transactional</span>
-        </div>
-        <div className="glass-panel stat-card">
-          <h3>Avg Order Value</h3>
-          <div className="value">₹{salesData.average_order_value?.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
-          <span style={{ color: '#10B981', fontSize: '0.9rem' }}>Positive Trend</span>
-        </div>
-      </div>
+      {loading ? (
+        <>
+          <div className="dashboard-grid">
+            <div className="skeleton" style={{ height: 120 }}></div>
+            <div className="skeleton" style={{ height: 120 }}></div>
+            <div className="skeleton" style={{ height: 120 }}></div>
+          </div>
+          <div className="dashboard-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+            <div className="skeleton" style={{ height: 400 }}></div>
+            <div className="skeleton" style={{ height: 400 }}></div>
+          </div>
+        </>
+      ) : (
+        <motion.div variants={containerVariants} initial="hidden" animate="show">
+          {/* KPI Stats */}
+          <div className="dashboard-grid">
+            <motion.div variants={itemVariants} className="glass-panel stat-card">
+              <h3>Total Sales Velocity</h3>
+              <div className="value">₹{salesData.total_sales?.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+              <span style={{ color: 'var(--accent-secondary)', fontSize: '0.9rem' }}>+12% vs Last Year (Roll-up)</span>
+            </motion.div>
+            <motion.div variants={itemVariants} className="glass-panel stat-card">
+              <h3>Total Checkouts</h3>
+              <div className="value">{salesData.total_orders?.toLocaleString()}</div>
+              <span style={{ color: 'var(--accent-primary)', fontSize: '0.9rem' }}>Transactional</span>
+            </motion.div>
+            <motion.div variants={itemVariants} className="glass-panel stat-card">
+              <h3>Avg Order Value</h3>
+              <div className="value">₹{salesData.average_order_value?.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+              <span style={{ color: '#10B981', fontSize: '0.9rem' }}>Positive Trend</span>
+            </motion.div>
+          </div>
 
-      {/* Analytics Charts */}
-      <div className="dashboard-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-        
-        {/* Regression Prediction */}
-        <div className="glass-panel chart-container">
-          <h2>Sales Trend & Prediction (Linear Regression)</h2>
-          <ResponsiveContainer width="100%" height="80%">
-            <LineChart data={predictions}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2a2c3d" />
-              <XAxis dataKey="period" stroke="#94a3b8" />
-              <YAxis stroke="#94a3b8" tickFormatter={(value) => `₹${value/1000}k`} />
-              <RechartsTooltip 
-                contentStyle={{ backgroundColor: 'rgba(19, 21, 31, 0.9)', border: '1px solid rgba(255,255,255,0.1)' }}
-              />
-              <Legend />
-              <Line type="monotone" dataKey="actual_sales" stroke="#6366f1" strokeWidth={3} name="Actual Sales" dot={{r: 4}} />
-              <Line type="monotone" dataKey="predicted_sales" stroke="#ec4899" strokeWidth={3} strokeDasharray="5 5" name="Predicted Sales" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+          {/* Analytics Charts */}
+          <div className="dashboard-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+            
+            <motion.div variants={itemVariants} className="glass-panel chart-container">
+              <h2>Sales Trend & Prediction (Linear Regression)</h2>
+              <ResponsiveContainer width="100%" height="80%">
+                <LineChart data={predictions}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2c3d" />
+                  <XAxis dataKey="period" stroke="#94a3b8" />
+                  <YAxis stroke="#94a3b8" tickFormatter={(value) => `₹${value/1000}k`} />
+                  <RechartsTooltip contentStyle={{ backgroundColor: 'rgba(19, 21, 31, 0.9)', border: '1px solid rgba(255,255,255,0.1)' }} />
+                  <Legend />
+                  <Line type="monotone" dataKey="actual_sales" stroke="#6366f1" strokeWidth={3} name="Actual Sales" dot={{r: 4}} />
+                  <Line type="monotone" dataKey="predicted_sales" stroke="#ec4899" strokeWidth={3} strokeDasharray="5 5" name="Predicted Sales" />
+                </LineChart>
+              </ResponsiveContainer>
+            </motion.div>
 
-        {/* KMeans Clustering */}
-        <div className="glass-panel chart-container">
-          <h2>Customer Segments (K-Means RFM)</h2>
-          <div style={{ display: 'flex', height: '80%' }}>
-            <ResponsiveContainer width="50%" height="100%">
-              <PieChart>
-                <Pie
-                  data={clusters}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="Customer_Count"
-                  nameKey="Segment"
-                >
-                  {clusters.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+            <motion.div variants={itemVariants} className="glass-panel chart-container">
+              <h2>Customer Segments (K-Means RFM)</h2>
+              <div style={{ display: 'flex', height: '80%' }}>
+                <ResponsiveContainer width="50%" height="100%">
+                  <PieChart>
+                    <Pie data={clusters} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="Customer_Count" nameKey="Segment">
+                      {clusters.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                    </Pie>
+                    <RechartsTooltip contentStyle={{ backgroundColor: '#13151f', border: 'none' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ width: '50%', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1rem' }}>
+                  {clusters.map((cluster, i) => (
+                    <div key={i}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: COLORS[i] }}></div>
+                        <strong style={{ color: 'var(--text-main)' }}>{cluster.Segment}</strong>
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        Avg Spend: ₹{cluster.Avg_Monetary?.toLocaleString(undefined, {maximumFractionDigits: 0})} <br/>
+                        {cluster.Customer_Count} Users
+                      </div>
+                    </div>
                   ))}
-                </Pie>
-                <RechartsTooltip contentStyle={{ backgroundColor: '#13151f', border: 'none' }} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div style={{ width: '50%', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1rem' }}>
-              {clusters.map((cluster, i) => (
-                <div key={i}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                    <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: COLORS[i] }}></div>
-                    <strong style={{ color: 'var(--text-main)' }}>{cluster.Segment}</strong>
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    Avg Spend: ₹{cluster.Avg_Monetary?.toLocaleString()} <br/>
-                    {cluster.Customer_Count} Users
+                  <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--accent-secondary)' }}>
+                    * High value clusters should be targeted with loyalty programs.
                   </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            </motion.div>
+
           </div>
-        </div>
 
-      </div>
-
-      {/* Market Basket Analysis */}
-      <div className="glass-panel" style={{ padding: '1.5rem' }}>
-        <h2 style={{ marginBottom: '1rem' }}>Product Association Rules (Apriori Analysis)</h2>
-        <div style={{ overflowX: 'auto' }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Rule (Antecedent → Consequent)</th>
-                <th>Confidence</th>
-                <th>Support</th>
-                <th>Lift</th>
-              </tr>
-            </thead>
-            <tbody>
-              {marketBasket.map((rule, idx) => (
-                <tr key={idx}>
-                  <td style={{ color: 'var(--text-main)', fontWeight: 500 }}>{rule.rule}</td>
-                  <td>{(rule.confidence * 100).toFixed(1)}%</td>
-                  <td>{(rule.support * 100).toFixed(2)}%</td>
-                  <td style={{ color: 'var(--accent-secondary)', fontWeight: 'bold' }}>{rule.lift.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+          <motion.div variants={itemVariants} className="glass-panel" style={{ padding: '1.5rem' }}>
+            <h2 style={{ marginBottom: '1rem' }}>Product Association Rules (Apriori Analysis)</h2>
+            <div style={{ overflowX: 'auto' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rule (Antecedent → Consequent)</th>
+                    <th>Confidence</th>
+                    <th>Support</th>
+                    <th>Lift Payload</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {marketBasket.map((rule, idx) => (
+                    <tr key={idx}>
+                      <td style={{ color: 'var(--text-main)', fontWeight: 500 }}>{rule.rule}</td>
+                      <td>{(rule.confidence * 100).toFixed(1)}%</td>
+                      <td>{(rule.support * 100).toFixed(2)}%</td>
+                      <td style={{ color: 'var(--accent-secondary)', fontWeight: 'bold' }}>{rule.lift.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </motion.div>
   );
 }
