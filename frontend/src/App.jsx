@@ -8,6 +8,7 @@ import Auth from './pages/Auth';
 import Settings from './pages/Settings';
 import OLAPTerminal from './pages/OLAPTerminal';
 import ETLTracker from './pages/ETLTracker';
+import Ingestion from './pages/Ingestion';
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -19,6 +20,7 @@ function AnimatedRoutes() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/terminal" element={<OLAPTerminal />} />
         <Route path="/etl" element={<ETLTracker />} />
+        <Route path="/ingestion" element={<Ingestion />} />
       </Routes>
     </AnimatePresence>
   );

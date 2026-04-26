@@ -5,8 +5,8 @@ def generate_market_basket(df):
     """
     Simulates Market Basket Analysis using Apriori algorithm.
     """
-    # Group by InvoiceNo to get items in a basket
-    basket = df.groupby(['InvoiceNo', 'Description'])['Quantity'].sum().unstack().reset_index().fillna(0).set_index('InvoiceNo')
+    # Group by transaction_id to get items in a basket
+    basket = df.groupby(['transaction_id', 'product_name'])['quantity'].sum().unstack().reset_index().fillna(0).set_index('transaction_id')
     
     # Convert quantities to presence/absence boolean for Apriori
     def encode_units(x):

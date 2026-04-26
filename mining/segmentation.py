@@ -9,13 +9,13 @@ def generate_segmentation(df):
     """
     # Create RFM Features
     # Recency (days since last purchase relative to max date)
-    max_date = df['InvoiceDate'].max()
-    rfm = df.groupby('CustomerID').agg({
-        'InvoiceDate': lambda x: (max_date - x.max()).days,
-        'InvoiceNo': 'nunique',
-        'Amount': 'sum'
+    max_date = df['timestamp'].max()
+    rfm = df.groupby('customer_id').agg({
+        'timestamp': lambda x: (max_date - x.max()).days,
+        'transaction_id': 'nunique',
+        'amount': 'sum'
     })
-    rfm.rename(columns={'InvoiceDate': 'Recency', 'InvoiceNo': 'Frequency', 'Amount': 'Monetary'}, inplace=True)
+    rfm.rename(columns={'timestamp': 'Recency', 'transaction_id': 'Frequency', 'amount': 'Monetary'}, inplace=True)
     
     # Filter out outliers or zero/negative monetary for better clustering
     rfm = rfm[rfm['Monetary'] > 0]

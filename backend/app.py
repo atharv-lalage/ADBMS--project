@@ -1,13 +1,15 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
 import sys
 import os
+import json
+from werkzeug.utils import secure_filename
 
 # Add parent path to import mining scripts
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from etl.etl_pipeline import load_and_clean_data
+from etl.etl_pipeline import load_and_clean_data, standardize_dataset
 from mining.segmentation import generate_segmentation
 from mining.prediction import generate_prediction
 from mining.market_basket import generate_market_basket
@@ -15,38 +17,85 @@ from mining.market_basket import generate_market_basket
 app = Flask(__name__)
 CORS(app)
 
-# Global memory to hold dataset to prevent reloading on every request
-df = None
+# Use localized file cache instead of generic loader
+CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'dataset', 'cached_data.pkl')
+
+# Keep analytics cache in memory
 cached_analytics = {}
 
-def get_data():
-    global df
-    if df is None:
-        cache_file = os.path.join(os.path.dirname(__file__), '..', 'dataset', 'cached_data.pkl')
-        if os.path.exists(cache_file):
-            print("Loading dataset from rapid local cache...")
-            df = pd.read_pickle(cache_file)
+def get_current_dataset():
+    if os.path.exists(CACHE_FILE):
+        return pd.read_pickle(CACHE_FILE)
+    return pd.DataFrame()
+
+@app.route('/api/upload', methods=['POST'])
+def upload_dataset():
+    if 'file' not in request.files or 'mapping' not in request.form:
+        return jsonify({"error": "Missing payload"}), 400
+        
+    file = request.files['file']
+    try:
+        mapping = json.loads(request.form['mapping'])
+    except Exception:
+        return jsonify({"error": "Invalid mapping structure"}), 400
+        
+    filename = secure_filename(file.filename)
+    
+    try:
+        # 1. Load Raw File Data
+        if filename.endswith('.csv'):
+            df_new = pd.read_csv(file)
+        elif filename.endswith(('.xls', '.xlsx')):
+            df_new = pd.read_excel(file)
         else:
-            file_path = os.path.join(os.path.dirname(__file__), '..', 'dataset', 'Online Retail.xlsx')
-            try:
-                df = load_and_clean_data(file_path)
-                df.to_pickle(cache_file)
-            except Exception as e:
-                print(f"Error loading data: {e}")
-                df = pd.DataFrame()
-    return df
+            return jsonify({"error": "Unsupported format"}), 400
+        
+        # 2. Standardize Schema internally
+        df_new = standardize_dataset(df_new, mapping)
+        
+        # 3. Execution Standard Cleaning Parameters
+        df_new = load_and_clean_data(df_new)
+        
+        if df_new.empty:
+            return jsonify({"error": "Dataset was wiped entirely during cleaning. Check mapping."}), 400
+            
+        # 4. Save specific localized pickle for state handling
+        df_new.to_pickle(CACHE_FILE)
+        
+        # 5. Clear Analytics API caches for fresh recomputations
+        cached_analytics.clear()
+        
+        return jsonify({"status": "success", "rows_mapped": len(df_new)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/dataset/headers', methods=['POST'])
+def get_dataset_headers():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    filename = secure_filename(file.filename)
+    try:
+        if filename.endswith('.csv'):
+            df_temp = pd.read_csv(file, nrows=0)
+        elif filename.endswith(('.xls', '.xlsx')):
+            df_temp = pd.read_excel(file, nrows=0)
+        else:
+            return jsonify({"error": "Unsupported format"}), 400
+        return jsonify({"columns": df_temp.columns.tolist()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/products', methods=['GET'])
 def get_products():
     if 'products' in cached_analytics:
         return jsonify(cached_analytics['products'])
         
-    data = get_data()
+    data = get_current_dataset()
     if data.empty:
         return jsonify([])
     
-    # Return top 50 products for listing
-    products = data[['StockCode', 'Description', 'Category', 'UnitPrice']].drop_duplicates(subset=['StockCode']).head(50)
+    products = data[['product_id', 'product_name', 'category', 'price']].drop_duplicates(subset=['product_id']).head(50)
     products.columns = ['id', 'name', 'category', 'price']
     
     result = products.to_dict(orient='records')
@@ -58,17 +107,17 @@ def get_sales():
     if 'sales' in cached_analytics:
         return jsonify(cached_analytics['sales'])
         
-    data = get_data()
+    data = get_current_dataset()
     if data.empty:
         return jsonify({})
         
-    total_sales = data['Amount'].sum()
-    total_orders = data['InvoiceNo'].nunique()
+    total_sales = data['amount'].sum()
+    total_orders = data['transaction_id'].nunique()
     
     result = {
         'total_sales': round(total_sales, 2),
         'total_orders': total_orders,
-        'average_order_value': round(total_sales / total_orders, 2)
+        'average_order_value': round(total_sales / total_orders, 2) if total_orders > 0 else 0
     }
     cached_analytics['sales'] = result
     return jsonify(result)
@@ -78,7 +127,7 @@ def get_clusters():
     if 'clusters' in cached_analytics:
         return jsonify(cached_analytics['clusters'])
         
-    data = get_data()
+    data = get_current_dataset()
     if data.empty:
         return jsonify([])
     
@@ -91,7 +140,7 @@ def get_predictions():
     if 'predictions' in cached_analytics:
         return jsonify(cached_analytics['predictions'])
         
-    data = get_data()
+    data = get_current_dataset()
     if data.empty:
         return jsonify([])
         
@@ -104,19 +153,16 @@ def get_market_basket():
     if 'market_basket' in cached_analytics:
         return jsonify(cached_analytics['market_basket'])
         
-    data = get_data()
+    data = get_current_dataset()
     if data.empty:
         return jsonify([])
         
-    # Since market basket is expensive on 500k rows, we'll sample the latest month
-    max_date = data['InvoiceDate'].max()
-    sample_data = data[data['InvoiceDate'] >= (max_date - pd.Timedelta(days=30))]
+    max_date = data['timestamp'].max()
+    sample_data = data[data['timestamp'] >= (max_date - pd.Timedelta(days=30))]
     
     rules = generate_market_basket(sample_data)
     cached_analytics['market_basket'] = rules
     return jsonify(rules)
 
 if __name__ == '__main__':
-    # Pre-warm data loading
-    # get_data() 
     app.run(debug=True, port=5000)

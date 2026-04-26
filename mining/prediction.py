@@ -7,14 +7,14 @@ def generate_prediction(df):
     Simulates Sales Prediction using Linear Regression based on monthly sales trend.
     """
     # Aggregate sales by month
-    df['Month_Year'] = df['InvoiceDate'].dt.to_period('M')
-    monthly_sales = df.groupby('Month_Year')['Amount'].sum().reset_index()
+    df['Month_Year'] = df['timestamp'].dt.to_period('M')
+    monthly_sales = df.groupby('Month_Year')['amount'].sum().reset_index()
     
     # Convert 'Month_Year' to an integer scale (e.g., months since start)
     monthly_sales['Month_Num'] = np.arange(len(monthly_sales))
     
     X = monthly_sales[['Month_Num']]
-    y = monthly_sales['Amount']
+    y = monthly_sales['amount']
     
     if len(X) < 2:
         return []
@@ -31,7 +31,7 @@ def generate_prediction(df):
     for _, row in monthly_sales.iterrows():
         results.append({
             'period': str(row['Month_Year']),
-            'actual_sales': round(row['Amount'], 2),
+            'actual_sales': round(row['amount'], 2),
             'predicted_sales': round(model.predict(pd.DataFrame({'Month_Num': [row['Month_Num']]}))[0], 2)
         })
         
