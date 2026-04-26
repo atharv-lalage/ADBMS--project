@@ -16,7 +16,7 @@ const CATEGORIES = ['General', 'Decoration', 'Bags', 'Mugs', 'Gift'];
 
 const queries = {
   rollup: {
-    title: "Roll-up (Aggregation)",
+    title: "Sales over Time",
     key: "rollup",
     desc: "Aggregates sales by year and quarter. Optionally filter to a specific year.",
     buildSQL: (f) => `SELECT dt.year, dt.quarter,\n    SUM(sf.amount) as total_revenue\nFROM ecom_sales_fact sf\nJOIN ecom_dim_time dt ON sf.date_id = dt.date_id\n${f.year ? `WHERE dt.year = ${f.year}\n` : ''}GROUP BY dt.year, dt.quarter\nORDER BY dt.year, dt.quarter;`,
@@ -24,7 +24,7 @@ const queries = {
     fallbackData: [["2010","4","78640485"],["2011","1","187950000"],["2011","2","228900000"],["2011","3","245700000"]],
   },
   drilldown: {
-    title: "Drill-down (De-aggregation)",
+    title: "Top Products by Country",
     key: "drilldown",
     desc: "Breaks sales down by country and product. Filter by country or year.",
     buildSQL: (f) => `SELECT dc.country, dp.name,\n    SUM(sf.amount) as total_sales\nFROM ecom_sales_fact sf\nJOIN ecom_dim_customer dc ON sf.user_id = dc.user_id\nJOIN ecom_dim_product dp ON sf.product_id = dp.product_id\nJOIN ecom_dim_time dt ON sf.date_id = dt.date_id\nWHERE 1=1${f.country ? `\n  AND LOWER(dc.country) = '${f.country.toLowerCase()}'` : ''}${f.year ? `\n  AND dt.year = ${f.year}` : ''}\nGROUP BY dc.country, dp.name\nORDER BY total_sales DESC LIMIT 20;`,
@@ -32,7 +32,7 @@ const queries = {
     fallbackData: [["United Kingdom","WHITE HANGING HEART T-LIGHT HOLDER","15204500"],["United Kingdom","REGENCY CAKESTAND 3 TIER","8940200"],["Germany","JUMBO BAG RED RETROSPOT","6102400"]],
   },
   slice: {
-    title: "Slice (Single Dimension Cut)",
+    title: "Top Products by Month",
     key: "slice",
     desc: "Shows top products for a specific month and year. Change month/year to explore any period.",
     buildSQL: (f) => `SELECT dp.name as product_name,\n    SUM(sf.quantity) as units_sold,\n    SUM(sf.amount) as gross_revenue\nFROM ecom_sales_fact sf\nJOIN ecom_dim_time dt ON sf.date_id = dt.date_id\nJOIN ecom_dim_product dp ON sf.product_id = dp.product_id\nWHERE dt.month = ${f.month || 12}\n  AND dt.year = ${f.year || 2010}\nGROUP BY dp.name\nORDER BY gross_revenue DESC\nLIMIT 15;`,
@@ -40,7 +40,7 @@ const queries = {
     fallbackData: [["WHITE HANGING HEART T-LIGHT HOLDER","4201","1124817"],["REGENCY CAKESTAND 3 TIER","1840","981540"],["JUMBO BAG RED RETROSPOT","3119","890205"]],
   },
   dice: {
-    title: "Dice (Multi-Dimension Subcube)",
+    title: "Compare Categories",
     key: "dice",
     desc: "Compares selected categories across selected years. Pick multiple categories and years.",
     buildSQL: (f) => {
@@ -230,8 +230,8 @@ export default function OLAPTerminal() {
   return (
     <motion.div className="container" initial="initial" animate="in" exit="out" variants={pageVariants}>
       <div className="page-header">
-        <h1>Data Warehouse Engine Terminal</h1>
-        <p>Execute multi-dimensional SQL against the Snowflake Schema with live filters.</p>
+        <h1>Advanced Data Search</h1>
+        <p>Ask complex questions about your sales data and get instant answers.</p>
       </div>
 
       <div className="dashboard-grid" style={{ gridTemplateColumns: 'minmax(280px, 1fr) 2.5fr' }}>
@@ -242,7 +242,7 @@ export default function OLAPTerminal() {
           {/* Query selector */}
           <div className="glass-panel" style={{ padding: '1.5rem' }}>
             <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem', color: 'var(--text-main)' }}>
-              <Database size={18} /> ROLAP Operations
+              <Database size={18} /> Search Queries
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
               {Object.entries(queries).map(([key, query]) => (

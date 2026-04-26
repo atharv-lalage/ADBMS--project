@@ -3,6 +3,12 @@ from sqlalchemy import create_engine
 import numpy as np
 import os
 from dotenv import load_dotenv
+from sqlalchemy.dialects.postgresql import insert
+
+def insert_do_nothing(table, conn, keys, data_iter):
+    data = [dict(zip(keys, row)) for row in data_iter]
+    stmt = insert(table.table).values(data)
+    conn.execute(stmt.on_conflict_do_nothing())
 
 # Load environment variables from .env file up one level
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -20,35 +26,163 @@ def get_engine():
         return create_engine(DATABASE_URL)
     return create_engine(f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}')
 
+def normalize_columns(df):
+    """
+    Map any dataset's column names to a standard internal schema.
+    Supports: Online Retail (.xlsx), Superstore (.csv), train.csv
+    Internal schema uses: CustomerID, InvoiceNo, InvoiceDate, StockCode,
+                          Description, Quantity, UnitPrice, Amount, Country, Category
+    """
+    cols = df.columns.tolist()
+
+    # Build a lowercase-to-actual map for flexible matching
+    col_map = {c.lower().replace(' ', '').replace('-', '').replace('_', ''): c for c in cols}
+
+    rename = {}
+
+    # CustomerID
+    for k in ['customerid', 'customerno', 'custid']:
+        if k in col_map and 'CustomerID' not in df.columns:
+            rename[col_map[k]] = 'CustomerID'
+            break
+
+    # InvoiceNo / Order ID
+    for k in ['invoiceno', 'orderid', 'order id', 'transactionid']:
+        if k in col_map and 'InvoiceNo' not in df.columns:
+            rename[col_map[k]] = 'InvoiceNo'
+            break
+
+    # InvoiceDate / Order Date
+    for k in ['invoicedate', 'orderdate', 'date', 'transactiondate', 'shipdate']:
+        if k in col_map and 'InvoiceDate' not in df.columns:
+            rename[col_map[k]] = 'InvoiceDate'
+            break
+
+    # StockCode / Product ID
+    for k in ['stockcode', 'productid', 'itemcode', 'sku']:
+        if k in col_map and 'StockCode' not in df.columns:
+            rename[col_map[k]] = 'StockCode'
+            break
+
+    # Description / Product Name
+    for k in ['description', 'productname', 'itemname', 'name', 'subCategory']:
+        if k in col_map and 'Description' not in df.columns:
+            rename[col_map[k]] = 'Description'
+            break
+
+    # Quantity
+    for k in ['quantity', 'qty', 'units', 'orderquantity']:
+        if k in col_map and 'Quantity' not in df.columns:
+            rename[col_map[k]] = 'Quantity'
+            break
+
+    # UnitPrice / Sales (for datasets where there is already a total sales column)
+    has_unit_price = 'unitprice' in col_map
+    has_sales = 'sales' in col_map
+    if has_unit_price and 'UnitPrice' not in df.columns:
+        rename[col_map['unitprice']] = 'UnitPrice'
+    elif has_sales and 'UnitPrice' not in df.columns:
+        # Sales column is a per-row total, we'll set UnitPrice = Sales / Quantity later
+        rename[col_map['sales']] = '_SalesTotal'
+
+    # Country / Region
+    for k in ['country', 'region', 'state', 'city']:
+        if k in col_map and 'Country' not in df.columns:
+            rename[col_map[k]] = 'Country'
+            break
+
+    # Category
+    for k in ['category', 'productcategory', 'type']:
+        if k in col_map and 'Category' not in df.columns:
+            rename[col_map[k]] = 'Category'
+            break
+
+    df = df.rename(columns=rename)
+    print(f"  Column mapping applied: {rename if rename else 'none needed'}")
+
+    # If only SalesTotal was available, back-calculate UnitPrice
+    if '_SalesTotal' in df.columns and 'UnitPrice' not in df.columns:
+        # If no Quantity column exists, default to 1 per row (sales-level datasets)
+        if 'Quantity' not in df.columns:
+            df['Quantity'] = 1
+        df['UnitPrice'] = df['_SalesTotal'] / df['Quantity'].replace(0, 1)
+        df = df.drop(columns=['_SalesTotal'])
+
+    # Ensure StockCode exists (use row index if not mappable)
+    if 'StockCode' not in df.columns:
+        df['StockCode'] = 'ITEM-' + df.index.astype(str)
+
+    # Ensure Description exists
+    if 'Description' not in df.columns:
+        df['Description'] = 'Unknown Product'
+
+    # Ensure Country exists
+    if 'Country' not in df.columns:
+        df['Country'] = 'Unknown'
+
+    return df
+
+
 def load_and_clean_data(file_path):
     print("Loading dataset...")
-    # Load Excel file (this might take a minute depending on hardware)
-    df = pd.read_excel(file_path)
+    if file_path.endswith('.csv'):
+        df = pd.read_csv(file_path, encoding='ISO-8859-1')
+    else:
+        df = pd.read_excel(file_path)
     print(f"Original shape: {df.shape}")
 
-    # 1. Remove Null Values in CustomerID
-    df = df.dropna(subset=['CustomerID'])
+    # Normalize all columns to the internal schema first
+    df = normalize_columns(df)
 
-    # 2. Remove Negative Quantities (returns/cancellations)
-    df = df[df['Quantity'] > 0]
+    # 1. Remove Null Values in CustomerID
+    if 'CustomerID' in df.columns:
+        df = df.dropna(subset=['CustomerID'])
+    else:
+        print("  WARNING: No CustomerID column found; skipping null-drop.")
+
+    # 2. Remove Negative / Zero Quantities
+    if 'Quantity' in df.columns:
+        df['Quantity'] = pd.to_numeric(df['Quantity'], errors='coerce').fillna(0)
+        df = df[df['Quantity'] > 0]
 
     # 3. Handle Date Format
-    df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'])
+    if 'InvoiceDate' in df.columns:
+        df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'], errors='coerce')
+        df = df.dropna(subset=['InvoiceDate'])
+    else:
+        df['InvoiceDate'] = pd.Timestamp.now()
 
-    # Derive generic category (since the dataset doesn't have one, we can map description to a category)
-    # For demonstration, we'll assign 'General' to all or derive based on keywords
-    df['Category'] = 'General'
-    df.loc[df['Description'].str.contains('BAG', case=False, na=False), 'Category'] = 'Bags'
-    df.loc[df['Description'].str.contains('MUG', case=False, na=False), 'Category'] = 'Mugs'
-    df.loc[df['Description'].str.contains('HEART', case=False, na=False), 'Category'] = 'Decoration'
-    df.loc[df['Description'].str.contains('GIFT', case=False, na=False), 'Category'] = 'Gift'
+    # 4. Ensure numeric UnitPrice
+    if 'UnitPrice' in df.columns:
+        df['UnitPrice'] = pd.to_numeric(df['UnitPrice'], errors='coerce').fillna(0)
 
-    # Convert GBP to INR (approx 105)
-    df['UnitPrice'] = df['UnitPrice'] * 105
+    # 4b. Ensure Quantity exists (fallback 1)
+    if 'Quantity' not in df.columns:
+        df['Quantity'] = 1
 
-    # Compute Amount
-    df['Amount'] = df['Quantity'] * df['UnitPrice']
-    
+    # 5. Derive Category from Description if not already set
+    if 'Category' not in df.columns or df['Category'].isna().all():
+        df['Category'] = 'General'
+        if 'Description' in df.columns:
+            df.loc[df['Description'].str.contains('BAG', case=False, na=False), 'Category'] = 'Bags'
+            df.loc[df['Description'].str.contains('MUG', case=False, na=False), 'Category'] = 'Mugs'
+            df.loc[df['Description'].str.contains('HEART', case=False, na=False), 'Category'] = 'Decoration'
+            df.loc[df['Description'].str.contains('GIFT|GIFT', case=False, na=False), 'Category'] = 'Gift'
+    else:
+        df['Category'] = df['Category'].fillna('General')
+
+    # 6. Convert price to INR if the values are small (likely GBP/USD, assume < 200 per unit = foreign currency)
+    if 'UnitPrice' in df.columns:
+        median_price = df['UnitPrice'].median()
+        if 0 < median_price < 200:
+            df['UnitPrice'] = df['UnitPrice'] * 105  # convert to INR approx
+
+    # 7. Compute Amount
+    if 'UnitPrice' in df.columns and 'Quantity' in df.columns:
+        df['Amount'] = df['Quantity'] * df['UnitPrice']
+    else:
+        df['Amount'] = 0
+
     print(f"Cleaned shape: {df.shape}")
     return df
 
@@ -58,32 +192,31 @@ def populate_oltp(df, engine):
     # Extract Users
     users_df = df[['CustomerID', 'Country']].drop_duplicates(subset=['CustomerID']).copy()
     users_df.columns = ['user_id', 'country']
-    users_df['user_id'] = users_df['user_id'].astype(int).astype(str)
+    users_df['user_id'] = users_df['user_id'].astype(str).str.strip()
     users_df['name'] = 'User ' + users_df['user_id']
-    users_df['email'] = 'user' + users_df['user_id'] + '@example.com'
-    users_df.to_sql('ecom_users', engine, if_exists='append', index=False)
+    users_df['email'] = 'user' + users_df['user_id'].str.replace('[^a-zA-Z0-9]', '', regex=True) + '@example.com'
+    users_df.to_sql('ecom_users', engine, if_exists='append', index=False, method=insert_do_nothing)
     
     # Extract Products
     products_df = df[['StockCode', 'Description', 'Category', 'UnitPrice']].drop_duplicates(subset=['StockCode']).copy()
-    # Handle duplicate descriptions for same stock code by taking the first one
     products_df = products_df.groupby('StockCode').first().reset_index()
     products_df.columns = ['product_id', 'name', 'category', 'price']
-    products_df['product_id'] = products_df['product_id'].astype(str)
-    products_df.to_sql('ecom_products', engine, if_exists='append', index=False)
+    products_df['product_id'] = products_df['product_id'].astype(str).str.strip()
+    products_df.to_sql('ecom_products', engine, if_exists='append', index=False, method=insert_do_nothing)
     
     # Extract Orders
     orders_df = df[['InvoiceNo', 'CustomerID', 'InvoiceDate']].drop_duplicates(subset=['InvoiceNo']).copy()
     orders_df.columns = ['order_id', 'user_id', 'order_date']
-    orders_df['order_id'] = orders_df['order_id'].astype(str)
-    orders_df['user_id'] = orders_df['user_id'].astype(int).astype(str)
-    orders_df.to_sql('ecom_orders', engine, if_exists='append', index=False)
+    orders_df['order_id'] = orders_df['order_id'].astype(str).str.strip()
+    orders_df['user_id'] = orders_df['user_id'].astype(str).str.strip()
+    orders_df.to_sql('ecom_orders', engine, if_exists='append', index=False, method=insert_do_nothing)
     
     # Extract Order Items
     order_items_df = df[['InvoiceNo', 'StockCode', 'Quantity', 'Amount']].copy()
     order_items_df.columns = ['order_id', 'product_id', 'quantity', 'amount']
-    order_items_df['order_id'] = order_items_df['order_id'].astype(str)
-    order_items_df['product_id'] = order_items_df['product_id'].astype(str)
-    order_items_df.to_sql('ecom_order_items', engine, if_exists='append', index=False)
+    order_items_df['order_id'] = order_items_df['order_id'].astype(str).str.strip()
+    order_items_df['product_id'] = order_items_df['product_id'].astype(str).str.strip()
+    order_items_df.to_sql('ecom_order_items', engine, if_exists='append', index=False, method=insert_do_nothing)
     print("OLTP Tables populated.")
 
 def populate_dw(df, engine):
@@ -92,7 +225,7 @@ def populate_dw(df, engine):
     # Categories
     categories = df[['Category']].drop_duplicates().copy()
     categories.columns = ['category_name']
-    categories.to_sql('ecom_dim_category', engine, if_exists='append', index=False)
+    categories.to_sql('ecom_dim_category', engine, if_exists='append', index=False, method=insert_do_nothing)
 
     # Fetch Category IDs to map to dimension product
     category_map = pd.read_sql("SELECT category_id, category_name FROM ecom_dim_category", engine)
@@ -101,9 +234,9 @@ def populate_dw(df, engine):
     # Dim Customer
     dim_cust = df[['CustomerID', 'Country']].drop_duplicates(subset=['CustomerID']).copy()
     dim_cust.columns = ['user_id', 'country']
-    dim_cust['user_id'] = dim_cust['user_id'].astype(int).astype(str)
+    dim_cust['user_id'] = dim_cust['user_id'].astype(str).str.strip()
     dim_cust['name'] = 'User ' + dim_cust['user_id']
-    dim_cust.to_sql('ecom_dim_customer', engine, if_exists='append', index=False)
+    dim_cust.to_sql('ecom_dim_customer', engine, if_exists='append', index=False, method=insert_do_nothing)
 
     # Dim Product
     dim_prod = df[['StockCode', 'Description', 'Category', 'UnitPrice']].drop_duplicates(subset=['StockCode']).copy()
@@ -112,7 +245,7 @@ def populate_dw(df, engine):
     dim_prod = dim_prod[['StockCode', 'Description', 'category_id', 'UnitPrice']]
     dim_prod.columns = ['product_id', 'name', 'category_id', 'price']
     dim_prod['product_id'] = dim_prod['product_id'].astype(str)
-    dim_prod.to_sql('ecom_dim_product', engine, if_exists='append', index=False)
+    dim_prod.to_sql('ecom_dim_product', engine, if_exists='append', index=False, method=insert_do_nothing)
 
     # Dim Time
     time_df = df[['InvoiceDate']].drop_duplicates().copy()
@@ -124,18 +257,18 @@ def populate_dw(df, engine):
     time_df['quarter'] = time_df['InvoiceDate'].dt.quarter
     time_df['day_of_week'] = time_df['InvoiceDate'].dt.dayofweek
     time_df = time_df.drop('InvoiceDate', axis=1).drop_duplicates(subset=['date_id'])
-    time_df.to_sql('ecom_dim_time', engine, if_exists='append', index=False)
+    time_df.to_sql('ecom_dim_time', engine, if_exists='append', index=False, method=insert_do_nothing)
 
     # Fact Table
     fact_df = df[['InvoiceNo', 'StockCode', 'CustomerID', 'InvoiceDate', 'Quantity', 'Amount']].copy()
     fact_df['date_id'] = fact_df['InvoiceDate'].dt.strftime('%Y%m%d').astype(int)
-    fact_df['order_id'] = fact_df['InvoiceNo'].astype(str)
-    fact_df['product_id'] = fact_df['StockCode'].astype(str)
-    fact_df['user_id'] = fact_df['CustomerID'].astype(int).astype(str)
+    fact_df['order_id'] = fact_df['InvoiceNo'].astype(str).str.strip()
+    fact_df['product_id'] = fact_df['StockCode'].astype(str).str.strip()
+    fact_df['user_id'] = fact_df['CustomerID'].astype(str).str.strip()
     
     fact_df = fact_df[['order_id', 'product_id', 'user_id', 'date_id', 'Quantity', 'Amount']]
     fact_df.columns = ['order_id', 'product_id', 'user_id', 'date_id', 'quantity', 'amount']
-    fact_df.to_sql('ecom_sales_fact', engine, if_exists='append', index=False)
+    fact_df.to_sql('ecom_sales_fact', engine, if_exists='append', index=False, method=insert_do_nothing)
     
     print("Data Warehouse populated.")
 

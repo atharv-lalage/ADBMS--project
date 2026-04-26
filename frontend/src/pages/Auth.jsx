@@ -29,8 +29,8 @@ export default function Auth({ onLogin }) {
           <div style={{ display: 'inline-flex', padding: '1rem', background: 'rgba(99, 102, 241, 0.1)', borderRadius: '50%', marginBottom: '1rem' }}>
             <Store size={40} color="var(--accent-primary)" />
           </div>
-          <h2 style={{ fontFamily: 'Outfit', fontSize: '1.8rem', marginBottom: '0.5rem' }}>Administrator Portal</h2>
-          <p style={{ color: 'var(--text-muted)' }}>Sign in to access Enterprise Analytics</p>
+          <h2 style={{ fontFamily: 'Outfit', fontSize: '1.8rem', marginBottom: '0.5rem' }}>Store Login</h2>
+          <p style={{ color: 'var(--text-muted)' }}>Sign in to view your store's dashboard</p>
         </div>
 
         <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -64,7 +64,7 @@ export default function Auth({ onLogin }) {
           {error && <div style={{ color: '#ec4899', fontSize: '0.85rem', textAlign: 'center' }}>{error}</div>}
 
           <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.75rem', marginTop: '0.5rem' }}>
-            Authenticate Securely
+            Log In
           </button>
         </form>
       </motion.div>

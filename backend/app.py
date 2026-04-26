@@ -7,6 +7,31 @@ import os
 import threading
 import uuid
 import traceback
+from dotenv import load_dotenv
+
+# Pre-import all heavy libraries at startup so Flask's watchdog reloader
+# does NOT see them as "new changes" when first used during an ETL job.
+# Without this, Flask restarts mid-ETL and kills in-memory job state (→ 404s).
+import sqlite3
+import sqlalchemy
+from sqlalchemy import text as _sa_text
+try:
+    from sqlalchemy.dialects import postgresql as _pg_dialect
+except Exception:
+    pass
+try:
+    import psycopg2
+except ImportError:
+    pass
+
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+
+try:
+    from groq import Groq
+    groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+except Exception as e:
+    groq_client = None
+    print(f"Groq API not loaded: {e}")
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -24,6 +49,18 @@ cached_analytics = {}
 # ETL job state store: job_id -> { status, logs, error }
 etl_jobs = {}
 
+def get_most_recent_dataset():
+    dataset_dir = os.path.join(os.path.dirname(__file__), '..', 'dataset')
+    valid_files = []
+    if os.path.exists(dataset_dir):
+        for f in os.listdir(dataset_dir):
+            if f.endswith('.csv') or (f.endswith('.xlsx') and not f.startswith('~$')):
+                valid_files.append(os.path.join(dataset_dir, f))
+    if not valid_files:
+        return None
+    valid_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+    return valid_files[0]
+
 def get_data():
     global df
     if df is None:
@@ -32,7 +69,10 @@ def get_data():
             print("Loading dataset from rapid local cache...")
             df = pd.read_pickle(cache_file)
         else:
-            file_path = os.path.join(os.path.dirname(__file__), '..', 'dataset', 'Online Retail.xlsx')
+            file_path = get_most_recent_dataset()
+            if not file_path:
+                print("No dataset files found!")
+                return pd.DataFrame()
             try:
                 df = load_and_clean_data(file_path)
                 df.to_pickle(cache_file)
@@ -124,6 +164,113 @@ def get_market_basket():
     return jsonify(rules)
 
 
+@app.route('/api/analytics/top-products', methods=['GET'])
+def get_top_products():
+    data = get_data()
+    if data.empty:
+        return jsonify([])
+    start = request.args.get('start')
+    end = request.args.get('end')
+    filtered = data.copy()
+    if start:
+        filtered = filtered[filtered['InvoiceDate'] >= pd.to_datetime(start)]
+    if end:
+        filtered = filtered[filtered['InvoiceDate'] <= pd.to_datetime(end)]
+    top = (
+        filtered.groupby('Description')['Amount']
+        .sum()
+        .reset_index()
+        .sort_values('Amount', ascending=False)
+        .head(10)
+    )
+    top.columns = ['product', 'revenue']
+    top['revenue'] = top['revenue'].round(2)
+    return jsonify(top.to_dict(orient='records'))
+
+
+@app.route('/api/analytics/sales-by-country', methods=['GET'])
+def get_sales_by_country():
+    data = get_data()
+    if data.empty:
+        return jsonify([])
+    start = request.args.get('start')
+    end = request.args.get('end')
+    filtered = data.copy()
+    if start:
+        filtered = filtered[filtered['InvoiceDate'] >= pd.to_datetime(start)]
+    if end:
+        filtered = filtered[filtered['InvoiceDate'] <= pd.to_datetime(end)]
+    by_country = (
+        filtered.groupby('Country')['Amount']
+        .sum()
+        .reset_index()
+        .sort_values('Amount', ascending=False)
+        .head(12)
+    )
+    by_country.columns = ['country', 'revenue']
+    by_country['revenue'] = by_country['revenue'].round(2)
+    return jsonify(by_country.to_dict(orient='records'))
+
+
+@app.route('/api/analytics/ai-chat', methods=['POST'])
+def ai_chat():
+    if not groq_client:
+        return jsonify({'error': 'Groq not configured. Set GROQ_API_KEY in .env'}), 503
+    body = request.get_json(silent=True) or {}
+    user_msg = body.get('message', '').strip()
+    if not user_msg:
+        return jsonify({'error': 'No message provided'}), 400
+    try:
+        sales = cached_analytics.get('sales', {})
+        data = get_data()
+        context = ''
+        if not data.empty:
+            top = data.groupby('Description')['Amount'].sum().sort_values(ascending=False).head(5)
+            context += f"Top 5 products by revenue: {top.to_dict()}. "
+        if sales:
+            context += f"Total Sales: {sales.get('total_sales',0):,}, Total Orders: {sales.get('total_orders',0):,}, Avg Order Value: {sales.get('average_order_value',0):,}. "
+        prompt = f"""You are a smart business analyst assistant for an e-commerce dashboard.
+Available data context: {context}
+Answer the following question in 2-3 sentences. Be specific, use real numbers from context if available. No markdown or bullet points.
+Question: {user_msg}"""
+        completion = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.6,
+            max_tokens=200
+        )
+        return jsonify({'response': completion.choices[0].message.content})
+    except Exception as e:
+        print(f"AI Chat error: {e}")
+        return jsonify({'error': 'AI failed to respond.'}), 500
+
+
+@app.route('/api/analytics/explain-trends', methods=['GET'])
+def explain_trends():
+    if not groq_client:
+        return jsonify({'error': 'Groq client not configured. Check GROQ_API_KEY in .env'}), 503
+    try:
+        sales = cached_analytics.get('sales', {})
+        if not sales:
+            return jsonify({'response': 'Not enough data to analyze yet.'})
+
+        prompt = f"""You are an elite business analyst reviewing an e-commerce dashboard.
+Metrics: Total Sales: ₹{sales.get('total_sales', 0):,}, Total Orders: {sales.get('total_orders', 0):,}, Avg Order Value: ₹{sales.get('average_order_value', 0):,}
+
+Write a short, engaging 2-3 sentence insight explaining these numbers positively to the store owner. Do not use asterisks or markdown."""
+
+        completion = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=150
+        )
+        return jsonify({'response': completion.choices[0].message.content})
+    except Exception as e:
+        print(f"Groq API error: {e}")
+        return jsonify({'error': 'Failed to generate insights.'}), 500
+
+
 # ── ETL Endpoint ─────────────────────────────────────────────────────────────
 
 def _run_etl_job(job_id):
@@ -135,11 +282,12 @@ def _run_etl_job(job_id):
         print(f"[ETL:{job_id}] {msg}")
 
     try:
-        log("EXTRACT: Reading Online Retail.xlsx into memory...")
-        file_path = os.path.join(os.path.dirname(__file__), '..', 'dataset', 'Online Retail.xlsx')
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Dataset not found at {file_path}. Place 'Online Retail.xlsx' in the dataset/ folder.")
+        log("EXTRACT: Finding most recent dataset file...")
+        file_path = get_most_recent_dataset()
+        if not file_path:
+            raise FileNotFoundError("No .csv or .xlsx dataset found in the dataset/ folder.")
 
+        log(f"EXTRACT: Reading {os.path.basename(file_path)} into memory...")
         cleaned_df = load_and_clean_data(file_path)
         log(f"EXTRACT: Loaded {len(cleaned_df)} rows after cleaning.")
 
@@ -429,4 +577,7 @@ def dataset_info():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # use_reloader=False → prevents Flask watchdog from restarting the server
+    # when heavy libraries (sqlite3, sqlalchemy) are first imported during ETL.
+    # This permanently fixes the mid-job 404 crash caused by auto-reload.
+    app.run(debug=True, port=5000, use_reloader=False)

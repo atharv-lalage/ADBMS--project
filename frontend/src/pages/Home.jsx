@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { ShoppingCart, Search, TrendingUp, CheckCircle, AlertCircle } from 'lucide-react';
+import { ShoppingCart, Search, TrendingUp, CheckCircle, AlertCircle, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const pageVariants = {
@@ -19,51 +19,43 @@ const itemVariants = {
   show: { opacity: 1, scale: 1, transition: { type: 'spring', bounce: 0.4 } }
 };
 
-const ALL_CATEGORIES = ['All', 'General', 'Decoration', 'Bags', 'Mugs', 'Gift'];
-
 export default function Home() {
   const [products, setProducts] = useState([]);
   const [marketBasket, setMarketBasket] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
+  const [categories, setCategories] = useState(['All']);
   const [txState, setTxState] = useState({}); // productId -> { status, message }
 
   useEffect(() => {
-    const cachedProducts = sessionStorage.getItem('productsCache');
-    const cachedBasket = sessionStorage.getItem('basketCache');
+    // Always fetch fresh from the backend — no sessionStorage lock
+    // so the store shows the current dataset's products
+    const fetchProducts = () =>
+      axios.get('http://localhost:5000/api/products')
+        .then(res => {
+          const data = res.data;
+          setProducts(data);
 
-    if (cachedBasket) setMarketBasket(JSON.parse(cachedBasket));
+          // ── Dynamically build the category list from whatever the dataset has ──
+          const cats = ['All', ...new Set(data.map(p => p.category).filter(Boolean))];
+          setCategories(cats);
+          setLoading(false);
+        })
+        .catch(() => {
+          // Minimal generic fallback — no product names, just placeholders
+          setProducts([]);
+          setCategories(['All']);
+          setLoading(false);
+        });
 
-    if (cachedProducts) {
-      setProducts(JSON.parse(cachedProducts));
-      setLoading(false);
-      return;
-    }
+    const fetchBasket = () =>
+      axios.get('http://localhost:5000/api/analytics/market-basket')
+        .then(res => setMarketBasket(res.data))
+        .catch(() => {});
 
-    axios.get('http://localhost:5000/api/products')
-      .then(res => {
-        setProducts(res.data);
-        sessionStorage.setItem('productsCache', JSON.stringify(res.data));
-        setLoading(false);
-      })
-      .catch(() => {
-        const fallbackData = [
-          { id: '85123A', name: 'WHITE HANGING HEART T-LIGHT HOLDER', category: 'Decoration', price: 267.75 },
-          { id: '71053',  name: 'WHITE METAL LANTERN', category: 'General', price: 355.95 },
-          { id: '84406B', name: 'CREAM CUPID HEARTS COAT HANGER', category: 'Decoration', price: 288.75 },
-          { id: '84029G', name: 'KNITTED UNION FLAG HOT WATER BOTTLE', category: 'General', price: 355.95 },
-          { id: '84029E', name: 'RED WOOLLY HOTTIE WHITE HEART', category: 'General', price: 355.95 },
-          { id: '22752',  name: 'SET 7 BABUSHKA NESTING BOXES', category: 'General', price: 803.25 },
-          { id: '21730',  name: 'GLASS STAR FROSTED T-LIGHT HOLDER', category: 'Decoration', price: 446.25 },
-          { id: '22633',  name: 'HAND WARMER UNION JACK', category: 'General', price: 194.25 },
-          { id: '22960',  name: 'JAM MAKING SET WITH JARS', category: 'Gift', price: 525.00 },
-          { id: '22086',  name: 'PAPER CHAIN KIT 50S CHRISTMAS', category: 'Gift', price: 210.00 },
-        ];
-        setProducts(fallbackData);
-        sessionStorage.setItem('productsCache', JSON.stringify(fallbackData));
-        setLoading(false);
-      });
+    fetchProducts();
+    fetchBasket();
   }, []);
 
   const getRecommendation = (productName) => {
@@ -82,10 +74,10 @@ export default function Home() {
         quantity: 1,
         amount: product.price
       });
-      const { order_id, message, simulated } = res.data;
+      const { order_id } = res.data;
       setTxState(prev => ({
         ...prev,
-        [product.id]: { status: 'success', message: `Order ${order_id}${simulated ? ' (simulated)' : ''} committed.` }
+        [product.id]: { status: 'success', message: `Order ${order_id} placed successfully.` }
       }));
     } catch (err) {
       const errMsg = err.response?.data?.error || err.message;
@@ -104,8 +96,15 @@ export default function Home() {
     <motion.div className="container" initial="initial" animate="in" exit="out" variants={pageVariants}>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
-          <h1>Enterprise Storefront</h1>
-          <p>Real-time OLTP inventory powered by Apriori Recommendations.</p>
+          <h1>My Store</h1>
+          <p>
+            Shop for products and see smart recommendations.
+            {products.length > 0 && (
+              <span style={{ marginLeft: '0.75rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                {products.length} products from your dataset
+              </span>
+            )}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: '1rem' }}>
           <div style={{ position: 'relative' }}>
@@ -118,12 +117,13 @@ export default function Home() {
               style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', color: 'white', padding: '0.5rem 1rem 0.5rem 2.5rem', borderRadius: '8px', outline: 'none' }}
             />
           </div>
+          {/* Dynamic category dropdown — built from the actual loaded dataset */}
           <select
             value={activeCategory}
             onChange={(e) => setActiveCategory(e.target.value)}
             style={{ background: 'var(--bg-secondary)', color: 'white', border: '1px solid var(--glass-border)', padding: '0.5rem', borderRadius: '8px', outline: 'none' }}
           >
-            {ALL_CATEGORIES.map(cat => (
+            {categories.map(cat => (
               <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
@@ -136,6 +136,21 @@ export default function Home() {
             <div key={i} className="skeleton" style={{ height: '220px' }}></div>
           ))}
         </div>
+      ) : products.length === 0 ? (
+        /* No products at all — user hasn't run ETL yet */
+        <motion.div
+          initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+          style={{ textAlign: 'center', padding: '5rem 2rem' }}
+        >
+          <Package size={56} color="var(--text-muted)" style={{ marginBottom: '1.5rem', opacity: 0.4 }} />
+          <h2 style={{ color: 'var(--text-muted)', marginBottom: '0.75rem' }}>No Products Yet</h2>
+          <p style={{ color: 'var(--text-muted)', maxWidth: 400, margin: '0 auto 2rem' }}>
+            Your store will automatically show products from your dataset after you run the <strong>Data Cleaner</strong> pipeline.
+          </p>
+          <a href="/etl" style={{ textDecoration: 'none' }}>
+            <button className="btn btn-primary">Go to Data Cleaner →</button>
+          </a>
+        </motion.div>
       ) : filteredProducts.length === 0 ? (
         <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '4rem', fontSize: '1rem' }}>
           No products found for "{search}" in {activeCategory}.
@@ -151,14 +166,20 @@ export default function Home() {
                   <span style={{ background: 'rgba(99,102,241,0.2)', color: 'var(--accent-primary)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '600', marginBottom: '1rem', display: 'inline-block' }}>
                     {product.category}
                   </span>
-                  <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem', fontFamily: 'Outfit' }}>{product.name}</h3>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1rem' }}>Stock ID: {product.id}</p>
+                  <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', fontFamily: 'Outfit', textTransform: 'capitalize', lineHeight: 1.4 }}>
+                    {product.name.length > 40 ? product.name.substring(0, 40) + '…' : product.name}
+                  </h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                    ID: {product.id}
+                  </p>
 
                   {recommendation && (
-                    <div style={{ background: 'linear-gradient(90deg, rgba(16,185,129,0.1), transparent)', borderLeft: '3px solid #10B981', padding: '8px 12px', borderRadius: '0 4px 4px 0', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-                      <TrendingUp size={14} style={{ display: 'inline', color: '#10B981', marginRight: 4 }} />
+                    <div style={{ background: 'linear-gradient(90deg, rgba(16,185,129,0.1), transparent)', borderLeft: '3px solid #10B981', padding: '8px 12px', borderRadius: '0 4px 4px 0', fontSize: '0.82rem', marginBottom: '0.5rem' }}>
+                      <TrendingUp size={13} style={{ display: 'inline', color: '#10B981', marginRight: 4 }} />
                       <span style={{ color: 'var(--text-muted)' }}>Frequently Bought Together:</span><br />
-                      <strong style={{ color: '#10B981' }}>{recommendation}</strong>
+                      <strong style={{ color: '#10B981' }}>
+                        {recommendation.length > 45 ? recommendation.substring(0, 45) + '…' : recommendation}
+                      </strong>
                     </div>
                   )}
 
@@ -178,7 +199,7 @@ export default function Home() {
                               : <span style={{ width: 13, height: 13, border: '2px solid #6366f1', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.6s linear infinite', flexShrink: 0 }} />
                           }
                           <span style={{ color: tx.status === 'success' ? '#10B981' : tx.status === 'error' ? '#ef4444' : '#6366f1' }}>
-                            {tx.status === 'loading' ? 'Committing to OLTP...' : tx.message}
+                            {tx.status === 'loading' ? 'Processing order...' : tx.message}
                           </span>
                         </div>
                       </motion.div>
@@ -187,7 +208,7 @@ export default function Home() {
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
-                  <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-main)' }}>
+                  <div style={{ fontSize: '1.4rem', fontWeight: '700', color: 'var(--text-main)' }}>
                     ₹{product.price?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </div>
                   <button
@@ -196,7 +217,7 @@ export default function Home() {
                     onClick={() => simulateTransaction(product)}
                     disabled={tx?.status === 'loading'}
                   >
-                    <ShoppingCart size={16} /> Simulate Tx
+                    <ShoppingCart size={16} /> Buy Item
                   </button>
                 </div>
               </motion.div>
