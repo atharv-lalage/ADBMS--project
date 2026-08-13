@@ -8,3 +8,5 @@ SQLAlchemy
 mlxtend
 openpyxl
 python-dotenv
+groq
+numpy

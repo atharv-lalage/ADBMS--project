@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
+import API_BASE_URL from '../config';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -57,7 +58,7 @@ function AIChatWidget() {
     setMessages(prev => [...prev, { role: 'user', text: msg }]);
     setThinking(true);
     try {
-      const res = await axios.post('http://localhost:5000/api/analytics/ai-chat', { message: msg });
+      const res = await axios.post(`${API_BASE_URL}/api/analytics/ai-chat`, { message: msg });
       setMessages(prev => [...prev, { role: 'ai', text: res.data.response || res.data.error }]);
     } catch {
       setMessages(prev => [...prev, { role: 'ai', text: 'Sorry, I could not reach the AI. Check your GROQ_API_KEY.' }]);
@@ -182,13 +183,13 @@ export default function Dashboard() {
     setLoading(true);
     try {
       const [salesRes, predRes, clusterRes, basketRes, topRes, countryRes, datasetRes] = await Promise.all([
-        axios.get('http://localhost:5000/api/analytics/sales').catch(() => ({ data: {} })),
-        axios.get('http://localhost:5000/api/analytics/predictions').catch(() => ({ data: [] })),
-        axios.get('http://localhost:5000/api/analytics/clusters').catch(() => ({ data: mockClusters })),
-        axios.get('http://localhost:5000/api/analytics/market-basket').catch(() => ({ data: [] })),
-        axios.get('http://localhost:5000/api/analytics/top-products').catch(() => ({ data: [] })),
-        axios.get('http://localhost:5000/api/analytics/sales-by-country').catch(() => ({ data: [] })),
-        axios.get('http://localhost:5000/api/dataset/info').catch(() => ({ data: { files: [] } })),
+        axios.get(`${API_BASE_URL}/api/analytics/sales`).catch(() => ({ data: {} })),
+        axios.get(`${API_BASE_URL}/api/analytics/predictions`).catch(() => ({ data: [] })),
+        axios.get(`${API_BASE_URL}/api/analytics/clusters`).catch(() => ({ data: mockClusters })),
+        axios.get(`${API_BASE_URL}/api/analytics/market-basket`).catch(() => ({ data: [] })),
+        axios.get(`${API_BASE_URL}/api/analytics/top-products`).catch(() => ({ data: [] })),
+        axios.get(`${API_BASE_URL}/api/analytics/sales-by-country`).catch(() => ({ data: [] })),
+        axios.get(`${API_BASE_URL}/api/dataset/info`).catch(() => ({ data: { files: [] } })),
       ]);
       setSalesData(salesRes.data);
       setPredictions(predRes.data.length ? predRes.data : []);
@@ -212,7 +213,7 @@ export default function Dashboard() {
   const generateInsights = async () => {
     setLoadingInsight(true);
     try {
-      const res = await axios.get('http://localhost:5000/api/analytics/explain-trends');
+      const res = await axios.get(`${API_BASE_URL}/api/analytics/explain-trends`);
       setAiInsight(res.data.response || res.data.error || 'Failed to analyze data.');
     } catch {
       setAiInsight('Groq API Error: Ensure backend is running and your API key is correctly set in .env');

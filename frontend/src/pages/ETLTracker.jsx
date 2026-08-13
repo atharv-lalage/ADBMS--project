@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Activity, UploadCloud, DatabaseZap, Box, FileSpreadsheet, Play, RefreshCw, CheckCircle, AlertCircle, FolderOpen, ArrowRight } from 'lucide-react';
 import axios from 'axios';
+import API_BASE_URL from '../config';
 
 const pageVariants = {
   initial: { opacity: 0, y: 20 },
@@ -36,7 +37,7 @@ export default function ETLTracker() {
 
   useEffect(() => {
     // Load dataset info on mount
-    axios.get('http://localhost:5000/api/dataset/info')
+    axios.get(`${API_BASE_URL}/api/dataset/info`)
       .then(res => setDatasetFiles(res.data.files || []))
       .catch(() => {});
   }, [uploadStatus]);
@@ -57,7 +58,7 @@ export default function ETLTracker() {
     formData.append('file', file);
 
     try {
-      const res = await axios.post('http://localhost:5000/api/dataset/upload', formData, {
+      const res = await axios.post(`${API_BASE_URL}/api/dataset/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       setUploadStatus('success');
@@ -85,14 +86,14 @@ export default function ETLTracker() {
     setJobId(null);
 
     try {
-      const res = await axios.post('http://localhost:5000/api/etl/run');
+      const res = await axios.post(`${API_BASE_URL}/api/etl/run`);
       const id = res.data.job_id;
       setJobId(id);
 
       // Start polling
       pollRef.current = setInterval(async () => {
         try {
-          const poll = await axios.get(`http://localhost:5000/api/etl/status/${id}`);
+          const poll = await axios.get(`${API_BASE_URL}/api/etl/status/${id}`);
           const { status: s, logs: l } = poll.data;
           setLogs(l || []);
           setActiveStage(deriveStage(l || []));

@@ -580,4 +580,5 @@ if __name__ == '__main__':
     # use_reloader=False → prevents Flask watchdog from restarting the server
     # when heavy libraries (sqlite3, sqlalchemy) are first imported during ETL.
     # This permanently fixes the mid-job 404 crash caused by auto-reload.
-    app.run(debug=True, port=5000, use_reloader=False)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=True, host='0.0.0.0', port=port, use_reloader=False)

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import API_BASE_URL from '../config';
 import { ShoppingCart, Search, TrendingUp, CheckCircle, AlertCircle, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -32,7 +33,7 @@ export default function Home() {
     // Always fetch fresh from the backend — no sessionStorage lock
     // so the store shows the current dataset's products
     const fetchProducts = () =>
-      axios.get('http://localhost:5000/api/products')
+      axios.get(`${API_BASE_URL}/api/products`)
         .then(res => {
           const data = res.data;
           setProducts(data);
@@ -50,7 +51,7 @@ export default function Home() {
         });
 
     const fetchBasket = () =>
-      axios.get('http://localhost:5000/api/analytics/market-basket')
+      axios.get(`${API_BASE_URL}/api/analytics/market-basket`)
         .then(res => setMarketBasket(res.data))
         .catch(() => {});
 
@@ -68,7 +69,7 @@ export default function Home() {
   const simulateTransaction = async (product) => {
     setTxState(prev => ({ ...prev, [product.id]: { status: 'loading' } }));
     try {
-      const res = await axios.post('http://localhost:5000/api/transaction', {
+      const res = await axios.post(`${API_BASE_URL}/api/transaction`, {
         product_id: product.id,
         product_name: product.name,
         quantity: 1,

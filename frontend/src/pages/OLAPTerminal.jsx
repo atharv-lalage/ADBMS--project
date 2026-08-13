@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Terminal, Play, Database, Table, AlertTriangle, Wifi, Filter } from 'lucide-react';
 import axios from 'axios';
+import API_BASE_URL from '../config';
 
 const MONTHS = [
   { value: 1, label: 'January' }, { value: 2, label: 'February' },
@@ -107,7 +108,7 @@ export default function OLAPTerminal() {
     const filters = getFilters();
 
     try {
-      const res = await axios.post('http://localhost:5000/api/olap/query', {
+      const res = await axios.post(`${API_BASE_URL}/api/olap/query`, {
         query_key: activeQuery,
         filters
       });
